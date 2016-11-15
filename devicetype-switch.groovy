@@ -41,18 +41,18 @@ metadata {
 
 // parse events into attributes
 def parse(String description) {
-    log.debug "Parsing Dev ${device.deviceNetworkId} '${description}'"
+    printDebug "Parsing Dev ${device.deviceNetworkId} '${description}'"
 
     def parsedEvent = parseDiscoveryMessage(description)
-    //log.debug "Parsed event: " + parsedEvent
-    //log.debug "Body: " + parsedEvent['body']
+    //printDebug "Parsed event: " + parsedEvent
+    //printDebug "Body: " + parsedEvent['body']
     if (parsedEvent['body'] != null) {
         def xmlText = new String(parsedEvent.body.decodeBase64())
-        //log.debug 'Device Type Decoded body: ' + xmlText
+        //printDebug 'Device Type Decoded body: ' + xmlText
 
         def xmlTop = new XmlSlurper().parseText(xmlText)
         def nodes = xmlTop.node
-        //log.debug 'Nodes: ' + nodes.size()
+        //printDebug 'Nodes: ' + nodes.size()
 
         def childMap = [:]
         parent.getAllChildDevices().each { child ->
@@ -82,11 +82,11 @@ def parse(String description) {
                         status = status.toFloat() * 99.0 / 255.0
                         status = status.toInteger()
                     } catch (NumberFormatException ex) {
-                        log.debug "Exception parsing ${status}: ${ex} (will assume device is off)"
+                        printDebug "Exception parsing ${status}: ${ex} (will assume device is off)"
                         status = '0'
                         value = 'off'
                     }
-                    log.debug "Updating ${child.label} ${nodeAddr} to ${value}/${status}"
+                    printDebug "Updating ${child.label} ${nodeAddr} to ${value}/${status}"
                     child.sendEvent(name: 'switch', value: value)
 
                     if (status != 0) {
@@ -111,9 +111,9 @@ private getHostAddress() {
     def port = getDataValue("port")
 
     //convert IP/port
-    ip = convertHexToIP(ip)
-    port = convertHexToInt(port)
-    log.debug "Using ip: ${ip} and port: ${port} for device: ${device.id}"
+   // ip = convertHexToIP(ip)
+   // port = convertHexToInt(port)
+    printDebug "Using ip: ${ip} and port: ${port} for device: ${device.id}"
     return ip + ":" + port
 }
 
@@ -123,7 +123,7 @@ private getAuthorization() {
 }
 
 def getRequest(path) {
-    log.debug "Sending request for ${path} from ${device.deviceNetworkId}"
+    printDebug "Sending request for ${path} from ${device.deviceNetworkId}"
 
     new physicalgraph.device.HubAction(
         'method': 'GET',
@@ -131,12 +131,12 @@ def getRequest(path) {
         'headers': [
             'HOST': getHostAddress(),
             'Authorization': getAuthorization()
-        ], device.deviceNetworkId)
+        ])
 }
 
 // handle commands
 def on() {
-    log.debug "Executing 'on'"
+    printDebug "Executing 'on'"
 
     sendEvent(name: 'switch', value: 'on')
     def node = getDataValue("nodeAddr").replaceAll(" ", "%20")
@@ -145,7 +145,7 @@ def on() {
 }
 
 def off() {
-    log.debug "Executing 'off'"
+    printDebug "Executing 'off'"
 
     sendEvent(name: 'switch', value: 'off')
     def node = getDataValue("nodeAddr").replaceAll(" ", "%20")
@@ -155,18 +155,18 @@ def off() {
 
 def poll() {
     if (!device.deviceNetworkId.contains(':')) {
-        log.debug "Executing 'poll' from ${device.deviceNetworkId}"
+        printDebug "Executing 'poll' from ${device.deviceNetworkId}"
 
         def path = "/rest/status"
         getRequest(path)
     }
     else {
-        log.debug "Ignoring poll request for ${device.deviceNetworkId}"
+        printDebug "Ignoring poll request for ${device.deviceNetworkId}"
     }
 }
 
 def refresh() {
-    log.debug "Executing 'refresh'"
+    printDebug "Executing 'refresh'"
 
     def path = "/rest/status"
     getRequest(path)
@@ -228,4 +228,11 @@ private def parseDiscoveryMessage(String description) {
     }
 
     device
+}
+
+
+// so we can turn debugging on and off
+def printDebug(str)
+{
+    // log.debug(str)
 }
