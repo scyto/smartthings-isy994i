@@ -51,8 +51,8 @@ def parse(String description) {
     printDebug "Parsing Dev ${device.deviceNetworkId} '${description}'"
 
     def parsedEvent = parseDiscoveryMessage(description)
-    //printDebug "Parsed event: " + parsedEvent
-    //printDebug "Body: " + parsedEvent['body']
+    printDebug "Parsed event: " + parsedEvent
+    printDebug "Body: " + parsedEvent['body']
     if (parsedEvent['body'] != null) {
         def xmlText = new String(parsedEvent.body.decodeBase64())
         //printDebug 'Device Type Decoded body: ' + xmlText
@@ -60,13 +60,7 @@ def parse(String description) {
         def xmlTop = new XmlSlurper().parseText(xmlText)
         def nodes = xmlTop.node
         //printDebug 'Nodes: ' + nodes.size()
-
-        def childMap = [:]
-        parent.getAllChildDevices().each { child ->
-            def childNodeAddr = child.getDataValue("nodeAddr")
-            childMap[childNodeAddr] = child
-        }
-
+/*
         nodes.each { node ->
             def nodeAddr = node.attributes().id
             def status = ''
@@ -102,6 +96,7 @@ def parse(String description) {
                 }
             }
         }
+*/
     }
 }
 
@@ -130,13 +125,13 @@ private getAuthorization() {
 }
 
 def getRequest(path) {
-    printDebug "Sending request for ${path} from ${device.deviceNetworkId}"
+    printDebug "Sending a request for ${path} from ${device.deviceNetworkId}"
     def headers = [
         'HOST': getHostAddress(),
         'Authorization': getAuthorization()
         ]
 
-    new physicalgraph.device.HubAction(
+    return new physicalgraph.device.HubAction(
         'method': 'GET',
         'path': path,
         'headers': headers)
@@ -146,13 +141,17 @@ def getRequest(path) {
 def on() {
     def level = device.latestValue('level')
     printDebug "Executing 'on' ${level}"
+    if(!level)
+    {
+        level = '50'
+    }
 
     level = level.toFloat() * 255.0 / 99.0
     level = level.toInteger()
     sendEvent(name: 'switch', value: 'on')
     def node = getDataValue("nodeAddr").replaceAll(" ", "%20")
     def path = "/rest/nodes/${node}/cmd/DON/${level}"
-    getRequest(path)
+    return getRequest(path)
 }
 
 def off() {
@@ -161,7 +160,7 @@ def off() {
     sendEvent(name: 'switch', value: 'off')
     def node = getDataValue("nodeAddr").replaceAll(" ", "%20")
     def path = "/rest/nodes/${node}/cmd/DOF"
-    getRequest(path)
+    return getRequest(path)
 }
 
 def setLevel(value) {
@@ -177,15 +176,13 @@ def setLevel(value) {
     }
     def node = getDataValue("nodeAddr").replaceAll(" ", "%20")
     def path = "/rest/nodes/${node}/set/DON/${value}"
-    getRequest(path)
+    return getRequest(path)
 }
 
 def poll() {
     if (!device.deviceNetworkId.contains(':')) {
         printDebug "Executing 'poll' from ${device.deviceNetworkId}"
-
-        def path = "/rest/status"
-        getRequest(path)
+        refresh()
     }
     else {
         printDebug "Ignoring poll request for ${device.deviceNetworkId}"
@@ -194,52 +191,19 @@ def poll() {
 
 def refresh() {
     printDebug "Executing 'refresh'"
-
-    def path = "/rest/status"
-    getRequest(path)
+    def node = getDataValue("nodeAddr").replaceAll(" ", "%20")
+    def path = "/rest/status/${node}"
+    return getRequest(path)
 }
 
 private def parseDiscoveryMessage(String description) {
+    printDebug "parseDimmerDiscoveryMessage: "  + description
+
     def device = [:]
     def parts = description.split(',')
     parts.each { part ->
         part = part.trim()
-        if (part.startsWith('devicetype:')) {
-            def valueString = part.split(":")[1].trim()
-            device.devicetype = valueString
-        } else if (part.startsWith('mac:')) {
-            def valueString = part.split(":")[1].trim()
-            if (valueString) {
-                device.mac = valueString
-            }
-        } else if (part.startsWith('networkAddress:')) {
-            def valueString = part.split(":")[1].trim()
-            if (valueString) {
-                device.ip = valueString
-            }
-        } else if (part.startsWith('deviceAddress:')) {
-            def valueString = part.split(":")[1].trim()
-            if (valueString) {
-                device.port = valueString
-            }
-        } else if (part.startsWith('ssdpPath:')) {
-            def valueString = part.split(":")[1].trim()
-            if (valueString) {
-                device.ssdpPath = valueString
-            }
-        } else if (part.startsWith('ssdpUSN:')) {
-            part -= "ssdpUSN:"
-            def valueString = part.trim()
-            if (valueString) {
-                device.ssdpUSN = valueString
-            }
-        } else if (part.startsWith('ssdpTerm:')) {
-            part -= "ssdpTerm:"
-            def valueString = part.trim()
-            if (valueString) {
-                device.ssdpTerm = valueString
-            }
-        } else if (part.startsWith('headers')) {
+        if (part.startsWith('headers')) {
             part -= "headers:"
             def valueString = part.trim()
             if (valueString) {
@@ -261,5 +225,5 @@ private def parseDiscoveryMessage(String description) {
 // so we can turn debugging on and off
 def printDebug(str)
 {
-    // log.debug(str)
+    log.debug(str)
 }

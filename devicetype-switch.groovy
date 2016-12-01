@@ -156,9 +156,7 @@ def off() {
 def poll() {
     if (!device.deviceNetworkId.contains(':')) {
         printDebug "Executing 'poll' from ${device.deviceNetworkId}"
-
-        def path = "/rest/status"
-        getRequest(path)
+        refresh()
     }
     else {
         printDebug "Ignoring poll request for ${device.deviceNetworkId}"
@@ -167,52 +165,18 @@ def poll() {
 
 def refresh() {
     printDebug "Executing 'refresh'"
-
-    def path = "/rest/status"
+    def node = getDataValue("nodeAddr").replaceAll(" ", "%20")
+    def path = "/rest/status/${node}"
     getRequest(path)
 }
 
 private def parseDiscoveryMessage(String description) {
+    printDebug "parseSwitchDiscoveryMessage: "  + description
     def device = [:]
     def parts = description.split(',')
     parts.each { part ->
         part = part.trim()
-        if (part.startsWith('devicetype:')) {
-            def valueString = part.split(":")[1].trim()
-            device.devicetype = valueString
-        } else if (part.startsWith('mac:')) {
-            def valueString = part.split(":")[1].trim()
-            if (valueString) {
-                device.mac = valueString
-            }
-        } else if (part.startsWith('networkAddress:')) {
-            def valueString = part.split(":")[1].trim()
-            if (valueString) {
-                device.ip = valueString
-            }
-        } else if (part.startsWith('deviceAddress:')) {
-            def valueString = part.split(":")[1].trim()
-            if (valueString) {
-                device.port = valueString
-            }
-        } else if (part.startsWith('ssdpPath:')) {
-            def valueString = part.split(":")[1].trim()
-            if (valueString) {
-                device.ssdpPath = valueString
-            }
-        } else if (part.startsWith('ssdpUSN:')) {
-            part -= "ssdpUSN:"
-            def valueString = part.trim()
-            if (valueString) {
-                device.ssdpUSN = valueString
-            }
-        } else if (part.startsWith('ssdpTerm:')) {
-            part -= "ssdpTerm:"
-            def valueString = part.trim()
-            if (valueString) {
-                device.ssdpTerm = valueString
-            }
-        } else if (part.startsWith('headers')) {
+        if (part.startsWith('headers')) {
             part -= "headers:"
             def valueString = part.trim()
             if (valueString) {
@@ -234,5 +198,5 @@ private def parseDiscoveryMessage(String description) {
 // so we can turn debugging on and off
 def printDebug(str)
 {
-    // log.debug(str)
+    log.debug(str)
 }
