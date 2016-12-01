@@ -49,6 +49,10 @@
         state.types = [:]
         state.devices = [:]
         state.hubid = 0
+        state.ip="192.168.0.92"
+        state.port="80"
+
+        printDebug "*****Running ip page"
 
         return dynamicPage(name:"ipPage", title:"ISY Setup Select", nextPage:"credPage", install:false, uninstall: true) {
             section("ISY Interface Selection") {
@@ -62,9 +66,11 @@
     // or pick IP:port
     def credPage() {
 
+        printDebug "*****Running cred page"
+
             if(isuseip)
             {
-                return dynamicPage(name:"credPage", title:"ISY Setup Credentials (page 1 of 4)", nextPage:"nodePage", install:false, uninstall: true) {
+                return dynamicPage(name:"credPage", title:"ISY Setup Credentials (page 1 of 4)", nextPage:"nodePage", install:false) {
                     section("Forwarder IP Selection") 
                     {
                         paragraph "Enter the IP Address (xxx.xxx.xxx.xxx) and port for the forwarder. Set the PI to fixed IP or use a fixed DHCP."
@@ -75,7 +81,7 @@
             }
             else
             {
-                return dynamicPage(name:"credPage", title:"ISY Setup Credentials (page 1 of 4)", nextPage:"isyPage", install:false, uninstall: true) {
+                return dynamicPage(name:"credPage", title:"ISY Setup Credentials (page 1 of 4)", nextPage:"isyPage", install:false) {
                 section("ISY Authentication") 
                     {
                         paragraph "For direct to an ISY server, enter the username and password."
@@ -89,7 +95,9 @@
     // ISY selection page - discover and choose which ISY to control
     // skipped if using ip address
     def isyPage() {
-        def refreshInterval = 5
+        printDebug "*****Running isy page"
+
+        // def refreshInterval = 5
 
         // if we do a back to here, clear everything out
         state.nodes = [:]
@@ -107,7 +115,7 @@
 
         def devicesForDialog = getDevicesForDialog()
 
-        return dynamicPage(name:"isyPage", title:"ISY Select Hub (page 2 of 4)", nextPage:"nodePage", refreshInterval: refreshInterval, install:false, uninstall: true) {
+        return dynamicPage(name:"isyPage", title:"ISY Select Hub (page 2 of 4)", nextPage:"nodePage", install:falsee) {
             section("Select an ISY device...") {
                 paragraph "Pick which ISY server to select devices from."
                 input "selectedISY", "enum", required:false, title:"Select ISY \n(${devicesForDialog.size() ?: 0} found)", multiple:true, options:devicesForDialog
@@ -136,39 +144,46 @@
 
     // Node selection preference page - choose which Insteon devices to control
     def nodePage() {
-        def refreshInterval = 5;
+        printDebug "*****Running node page"
+
+        // def refreshInterval = 5;
         def path = "/rest/nodes"
         def nodes = getNodes()
 
-        if(state.subscribed)
+        if(nodes.size() == 0)
         {
-            unsubscribe()
-            state.subscribed = false;
+            if(state.subscribed)
+            {
+                unsubscribe()
+                state.subscribed = false;
+            }
+        
+            if(!state.subscribed) {
+                printDebug('Subscribing to more updates')
+                // subscribe to answers from HUB, all responses will go here
+                subscribe(location, null, locationHandler, [filterEvents:false])
+                state.subscribed = true
+            }
+
+            if(isuseip)
+            {
+                state.ipaddress = ipaddress
+                state.port = ipport
+                sendHubCommand(getRequest(ipaddress, ipport, path))
+            }
+            else
+            {
+                def selDev = getSelectedDevice()
+                sendHubCommand(getRequest(selDev.value.ip, selDev.value.port, path))
+            }
+
+            nodes = getNodes()
         }
 
-        if(!state.subscribed) {
-            printDebug('Subscribing to more updates')
-            // subscribe to answers from HUB, all responses will go here
-            subscribe(location, null, locationHandler, [filterEvents:false])
-            state.subscribed = true
-        }
-
-        if(isuseip)
-        {
-            sendHubCommand(getRequest(ipaddress, ipport, path))
-        }
-        else
-        {
-            def selDev = getSelectedDevice()
-            sendHubCommand(getRequest(selDev.value.ip, selDev.value.port, path))
-        }
-
-        nodes = getNodes()
-
-        return dynamicPage(name:"nodePage", title:"ISY Node Reading (Page 3 of 4)", nextPage:"entryPage", refreshInterval: refreshInterval, install:false, uninstall: true) {
+        return dynamicPage(name:"nodePage", title:"ISY Node Reading (Page 3 of 4)", nextPage:"entryPage", install:false, refreshInterval:5) {
             section("Waiting for nodes to be found") {
                 paragraph "Just wait for the next line to fill in with a set of non-zero nodes. Usually this will take 5 seconds. Then click Next at the top of the page."
-                input "dummyEntry", "text", required:false, title:"Finding Nodes... \n(${nodes.size() ?: 0} found)"
+                paragraph  "Finding Nodes... \n(${nodes.size() ?: 0} found)"
             }
         }
 
@@ -176,15 +191,16 @@
 
     // Node selection preference page - choose which Insteon devices to control
     def entryPage() {
+        printDebug "*****Running entry page"
+
+        if(state.subscribed)
+        {
+            unsubscribe()
+            state.subscribed = false;
+        }
+
         def nodes = getNodes()
-
-        // if(state.subscribed)
-        // {
-        //     unsubscribe()
-        //     state.subscribed = false;
-        // }
-
-        def rooms = getNodes().collect {it.value}.sort()
+        def rooms = nodes.collect {it.value}.sort()
 
         // sort the nodes alphabetically ???
         return dynamicPage(name:"entryPage", title:"ISY Node Selection (Page 4 of 4)", nextPage:"", install:true, uninstall: true) {
@@ -224,6 +240,14 @@
 
         printDebug("There are ${state.types.size()} types at this time")
         state.types
+    }
+
+    def sendStatusRequest()
+    {
+        def path = "/rest/status"
+        sendHubCommand(getRequest(state.ipaddress, state.port, path))
+
+        runIn(300, sendStatusRequest)
     }
 
     // Handle rest response from the ISY forwarder
@@ -314,28 +338,26 @@
                 else
                 {
                     // a single status request
-                    def nodeAddress = sourceUrl - statusReq - '/'   // remove the leadin
-                    printDebug "node address="+nodeAddress
-                    printDebug "found status request"+msg.body
-                    def xmlNodes = msg.xml.property
-                    def level = '0'
-                    xmlNodes.each {
-                        level = it.@formatted.text() - '%'
-                        printDebug "Level: ${level}"
-                    }
-                    // now set the level for this switch
+                    // printDebug "found all status request"+msg.body
+                    def xmlNodes = msg.xml.node
                     // get all child devices
                     def kids = getChildDevices()    // do not get virtual devices (?)
-                    def dni = 'isy.'+nodeAddress    // the dni we are using
-                    def d = kids?.find {
-                        it.device.deviceNetworkId == dni
-                    }
-                    if(d)
-                    {
-                        def switchset = (level == '0') ? 'off' : 'on'
-                        printDebug 'sending event to kid: '+level+'.'+switchset
-                        d.sendEvent(name: 'level', value: level)
-                        d.sendEvent(name: 'switch', value: switchset)
+                    xmlNodes.each {
+                    // now set the level for this switch
+                        def level = it.property.@formatted.text() - '%'
+                        def nodeAddress = it.@id
+                       // printDebug "address.Level: ${nodeAddress}.${level}"
+                        def dni = 'isy.'+nodeAddress    // the dni we are using
+                        def d = kids?.find {
+                            it.device.deviceNetworkId == dni
+                        }
+                        if(d)
+                        {
+                            def switchset = (level == '0') ? 'off' : 'on'
+                            printDebug 'sending event to kid: '+dni+"@"+level+'.'+switchset
+                            d.sendEvent(name: 'level', value: level)
+                            d.sendEvent(name: 'switch', value: switchset)
+                        }
                     }
                 }
             }
@@ -395,6 +417,7 @@
 
     // Called after the last preferences page is completed
     def installed() {
+        printDebug("!!!!! running installed")
         // remove location subscription
         unsubscribe()
         state.subscribed = false
@@ -405,6 +428,7 @@
     }
 
     def updated() {
+        printDebug("!!!!! running updated")
         printDebug "Updated with settings: ${settings}"
 
         unsubscribe()
@@ -421,6 +445,7 @@
     }
 
     def initialize() {
+        printDebug("!!!!! running initialize")
         if(isuseip)
         {
             initializeIfIp()
@@ -429,6 +454,17 @@
         {
             initializeIfDev()
         }
+
+        // we need to have a subscription to get device change messages from the device REST requests
+        if(!state.subscribed) {
+            printDebug('Subscribing to additional updates')
+            // subscribe to answers from HUB, all responses will go here
+            subscribe(location, null, locationHandler, [filterEvents:false])
+            state.subscribed = true
+        }
+
+        // send the first status request, then every 300 seconds using runIn
+        sendStatusRequest()
     }
 
     def initializeIfDev() {

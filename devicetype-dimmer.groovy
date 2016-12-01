@@ -1,7 +1,8 @@
 /**
  *  ISY Controller - Dimmer devicetype
  *
- *  Copyright 2016 Richard L. Lynch <rich@richlynch.com>
+ *  Original Copyright 2014 Richard L. Lynch <rich@richlynch.com>
+ *  Heavily modified by Mark Zachmann 2016
  *
  *  Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except
  *  in compliance with the License. You may obtain a copy of the License at:
@@ -47,74 +48,14 @@ metadata {
 }
 
 // parse events into attributes
+// this is never called because the hub gets the REST responses
 def parse(String description) {
     printDebug "Parsing Dev ${device.deviceNetworkId} '${description}'"
-
-    def parsedEvent = parseDiscoveryMessage(description)
-    printDebug "Parsed event: " + parsedEvent
-    printDebug "Body: " + parsedEvent['body']
-    if (parsedEvent['body'] != null) {
-        def xmlText = new String(parsedEvent.body.decodeBase64())
-        //printDebug 'Device Type Decoded body: ' + xmlText
-
-        def xmlTop = new XmlSlurper().parseText(xmlText)
-        def nodes = xmlTop.node
-        //printDebug 'Nodes: ' + nodes.size()
-/*
-        nodes.each { node ->
-            def nodeAddr = node.attributes().id
-            def status = ''
-
-            node.property.each { prop ->
-                if (prop.attributes().id == 'ST') {
-                    status = prop.attributes().value
-                }
-            }
-
-            if (status != '' && childMap[nodeAddr]) {
-                def child = childMap[nodeAddr]
-
-                if (child.getDataValue("nodeAddr") == nodeAddr) {
-                    def value = 'on'
-                    if (status == '0') {
-                        value = 'off'
-                    }
-                    try {
-                        status = status.toFloat() * 99.0 / 255.0
-                        status = status.toInteger()
-                    } catch (NumberFormatException ex) {
-                        printDebug "Exception parsing ${status}: ${ex} (will assume device is off)"
-                        status = '0'
-                        value = 'off'
-                    }
-                    printDebug "Updating ${child.label} ${nodeAddr} to ${value}/${status}"
-                    child.sendEvent(name: 'switch', value: value)
-
-                    if (status != 0) {
-                        child.sendEvent(name: 'level', value: status)
-                    }
-                }
-            }
-        }
-*/
-    }
-}
-
-private Integer convertHexToInt(hex) {
-    Integer.parseInt(hex,16)
-}
-
-private String convertHexToIP(hex) {
-    [convertHexToInt(hex[0..1]),convertHexToInt(hex[2..3]),convertHexToInt(hex[4..5]),convertHexToInt(hex[6..7])].join(".")
 }
 
 private getHostAddress() {
     def ip = getDataValue("ip")
     def port = getDataValue("port")
-
-    //convert IP/port
-    //ip = convertHexToIP(ip)
-    //port = convertHexToInt(port)
     printDebug "Using ip: ${ip} and port: ${port} for device: ${device.id}"
     return ip + ":" + port
 }
@@ -196,34 +137,8 @@ def refresh() {
     return getRequest(path)
 }
 
-private def parseDiscoveryMessage(String description) {
-    printDebug "parseDimmerDiscoveryMessage: "  + description
-
-    def device = [:]
-    def parts = description.split(',')
-    parts.each { part ->
-        part = part.trim()
-        if (part.startsWith('headers')) {
-            part -= "headers:"
-            def valueString = part.trim()
-            if (valueString) {
-                device.headers = valueString
-            }
-        } else if (part.startsWith('body')) {
-            part -= "body:"
-            def valueString = part.trim()
-            if (valueString) {
-                device.body = valueString
-            }
-        }
-    }
-
-    device
-}
-
-
 // so we can turn debugging on and off
 def printDebug(str)
 {
-    log.debug(str)
+ //   log.debug(str)
 }
