@@ -45,15 +45,20 @@
 
     // Decide if we use IP proxy or standard ISY
     def ipPage() {
-        state.nodes = [:]
-        state.types = [:]
-        state.devices = [:]
-        state.hubid = 0
-        state.ip="192.168.0.92"
-        state.port="80"
-
         printDebug "*****Running ip page"
-
+        if(!state.hubid)
+        {
+            printDebug "initial hubid"
+            state.hubid = 0
+        }
+        if(!state.ipaddress)
+        {
+            // as it turns out, this will execute only with a new install (or after uninstall)
+            // since state is persistent
+            printDebug "initial state ip address"
+            state.ipaddress="192.168.0.92"
+            state.port="80"
+        }
         return dynamicPage(name:"ipPage", title:"ISY Setup Select", nextPage:"credPage", install:false, uninstall: true) {
             section("ISY Interface Selection") {
                 paragraph "Intead of connecting directly to the ISY server, which requires sending username and password in plaintext you can use a very secure NGINX forwarder on a Raspberry PI to go to HTTPS."
@@ -65,31 +70,29 @@
     // Credentials preferences page - collect ISY username and password
     // or pick IP:port
     def credPage() {
-
         printDebug "*****Running cred page"
-
-            if(isuseip)
-            {
-                return dynamicPage(name:"credPage", title:"ISY Setup Credentials (page 1 of 4)", nextPage:"nodePage", install:false) {
-                    section("Forwarder IP Selection") 
-                    {
-                        paragraph "Enter the IP Address (xxx.xxx.xxx.xxx) and port for the forwarder. Set the PI to fixed IP or use a fixed DHCP."
-                        input( name:"ipaddress", type:"text", title: "IP Address", required:"true", defaultValue:"192.168.0.92")
-                        input( name:"ipport", type:"text", title: "Port", required:"true", defaultValue:"80")
-                    }
+        if(isuseip)
+        {
+            return dynamicPage(name:"credPage", title:"ISY Setup Credentials (page 1 of 4)", nextPage:"nodePage", install:false) {
+                section("Forwarder IP Selection") 
+                {
+                    paragraph "Enter the IP Address (xxx.xxx.xxx.xxx) and port for the forwarder. Set the PI to fixed IP or use a fixed DHCP."
+                    input( name:"ipaddress", type:"text", title: "IP Address", required:"true", defaultValue:"192.168.0.92")
+                    input( name:"ipport", type:"text", title: "Port", required:"true", defaultValue:"80")
                 }
             }
-            else
-            {
-                return dynamicPage(name:"credPage", title:"ISY Setup Credentials (page 1 of 4)", nextPage:"isyPage", install:false) {
-                section("ISY Authentication") 
-                    {
-                        paragraph "For direct to an ISY server, enter the username and password."
-                        input( name:"username", type:"text", title: "Username", required:"true", defaultValue:"admin")
-                        input( name:"password", type:"password", title: "Password", required:"true")
-                    }
+        }
+        else
+        {
+            return dynamicPage(name:"credPage", title:"ISY Setup Credentials (page 1 of 4)", nextPage:"isyPage", install:false) {
+            section("ISY Authentication") 
+                {
+                    paragraph "For direct to an ISY server, enter the username and password."
+                    input( name:"username", type:"text", title: "Username", required:"true", defaultValue:"admin")
+                    input( name:"password", type:"password", title: "Password", required:"true")
                 }
             }
+        }
     }
 
     // ISY selection page - discover and choose which ISY to control
@@ -97,11 +100,7 @@
     def isyPage() {
         printDebug "*****Running isy page"
 
-        // def refreshInterval = 5
-
-        // if we do a back to here, clear everything out
-        state.nodes = [:]
-        state.types = [:]
+        def refreshInterval = 5
 
         if(!state.subscribed) {
             printDebug('Subscribing to updates')
@@ -115,7 +114,7 @@
 
         def devicesForDialog = getDevicesForDialog()
 
-        return dynamicPage(name:"isyPage", title:"ISY Select Hub (page 2 of 4)", nextPage:"nodePage", install:falsee) {
+        return dynamicPage(name:"isyPage", title:"ISY Select Hub (page 2 of 4)", nextPage:"nodePage", install:false, refreshInterval:refreshInterval) {
             section("Select an ISY device...") {
                 paragraph "Pick which ISY server to select devices from."
                 input "selectedISY", "enum", required:false, title:"Select ISY \n(${devicesForDialog.size() ?: 0} found)", multiple:true, options:devicesForDialog
@@ -146,7 +145,7 @@
     def nodePage() {
         printDebug "*****Running node page"
 
-        // def refreshInterval = 5;
+        def refreshInterval = 5;
         def path = "/rest/nodes"
         def nodes = getNodes()
 
@@ -169,20 +168,21 @@
             {
                 state.ipaddress = ipaddress
                 state.port = ipport
-                sendHubCommand(getRequest(ipaddress, ipport, path))
             }
             else
             {
                 def selDev = getSelectedDevice()
-                sendHubCommand(getRequest(selDev.value.ip, selDev.value.port, path))
+                state.ipaddress = selDev.value.ip
+                state.port = selDev.value.port
             }
+            sendHubCommand(getRequest(state.ipaddress, state.port, path))
 
             nodes = getNodes()
         }
 
-        return dynamicPage(name:"nodePage", title:"ISY Node Reading (Page 3 of 4)", nextPage:"entryPage", install:false, refreshInterval:5) {
+        return dynamicPage(name:"nodePage", title:"ISY Node Reading (Page 3 of 4)", nextPage:"entryPage", install:false, refreshInterval:refreshInterval) {
             section("Waiting for nodes to be found") {
-                paragraph "Just wait for the next line to fill in with a set of non-zero nodes. Usually this will take 5 seconds. Then click Next at the top of the page."
+                paragraph "Wait for the next line to fill in with a set of non-zero nodes. Usually this will take 5 seconds. Then click Next at the top of the page."
                 paragraph  "Finding Nodes... \n(${nodes.size() ?: 0} found)"
             }
         }
@@ -200,7 +200,7 @@
         }
 
         def nodes = getNodes()
-        def rooms = nodes.collect {it.value}.sort()
+        def rooms = nodes.collect {it.value.name}.sort()
 
         // sort the nodes alphabetically ???
         return dynamicPage(name:"entryPage", title:"ISY Node Selection (Page 4 of 4)", nextPage:"", install:true, uninstall: true) {
@@ -232,22 +232,128 @@
         state.nodes
     }
 
-    // Returns a map of Insteon nodes for internal use
-    def getTypes() {
-        if (!state.types) {
-            state.types = [:]
-        }
-
-        printDebug("There are ${state.types.size()} types at this time")
-        state.types
-    }
-
+    // this updates all of the levels of all of the switches
+    // we run this every 7 minutes (see schedule call in initialize())
     def sendStatusRequest()
     {
+        if(!state.subscribed) 
+        {
+            printDebug('Scheduler has to resubscribe')
+            // subscribe to answers from HUB, all responses will go here
+            subscribe(location, null, locationHandler, [filterEvents:false])
+            state.subscribed = true
+        }
         def path = "/rest/status"
         sendHubCommand(getRequest(state.ipaddress, state.port, path))
+    }
 
-        runIn(300, sendStatusRequest)
+    // handle the response to a /rest/nodes request and enumerate all of the nodes
+    def enumerateNodes(msg)
+    {
+        def xmlNodes = msg.xml.node
+        printDebug 'Nodes: ' + xmlNodes.size()
+
+        // here we clear things out for real since we are about to reread them
+        state.nodes = [:]
+
+        // parse the individual nodes from the rest result
+        xmlNodes.each {
+            def addr = it.address.text()
+            def name = it.name.text()
+            def type = it.@nodeDefId.text()
+            if(addr && name && type)
+            {
+                printDebug "${addr} => ${name}.${type}"
+                state.nodes[addr] = [name:name, type:type, level:'0', ison:false]
+            }
+        }        
+    }
+
+    // update a switch settings so it looks correct
+    def updateNodeLevel(d, level)
+    {
+        def nodes = getNodes()
+        def nodeAddress = d.device.deviceNetworkId - 'isy.'
+        def n = nodes?.find {
+            it.key == nodeAddress
+        }
+        def isOn = (level != '0')
+        // check the cached value so we do not thrash
+        if(!n || (n.value.ison != isOn) || (isOn && n.value.level != level))
+        {
+            if(n)
+                printDebug 'sending event to kid: '+d.device.deviceNetworkId+"@"+level+". Old level=" + n.value.level
+             else  {
+                printDebug 'sending event to kid: '+d.device.deviceNetworkId+"@"+level+". No existing node"
+             }
+            if(!isOn)  {
+                // tell the switch its off but do not set level value
+                d.sendEvent(name: 'switch', value: 'off')
+            }
+            else  {
+                // tell the switch it is on, and set the current level value
+                d.sendEvent(name: 'level', value: level)
+                d.sendEvent(name: 'switch', value: 'on')
+            }
+
+            // update the cached node value
+            if(n) {
+                n.value.ison = isOn
+                if(isOn)
+                    n.value.level = level
+            }
+        }
+        else  {
+            printDebug "No change to kid: " + nodeAddress
+        }
+    }
+
+    // deal with the result from a single switch status response
+    def evaluateSwitchStatus(nodeAddress, msg)
+    {
+        // a single status request
+        printDebug "node address="+nodeAddress
+        printDebug "found status request"+msg.body
+        def xmlNodes = msg.xml.property
+        def level = '0'
+        xmlNodes.each {
+            level = it.@formatted.text() - '%'
+            printDebug "Level: ${level}"
+        }
+        // now set the level for this switch
+        // get all child devices
+        def kids = getChildDevices()    // do not get virtual devices (?)
+        def dni = 'isy.'+nodeAddress    // the dni we are using
+        def d = kids?.find {
+            it.device.deviceNetworkId == dni
+        }
+        if(d)
+        {
+            updateNodeLevel(d, level)
+        }
+    }
+
+    def evaluateAllStatus(msg)
+    {
+        // a single status request
+        // printDebug "found all status request"+msg.body
+        def xmlNodes = msg.xml.node
+        // get all child devices
+        def kids = getChildDevices()    // do not get virtual devices (?)
+        xmlNodes.each {
+        // now set the level for this switch
+            def level = it.property.@formatted.text() - '%'
+            def nodeAddress = it.@id
+            // printDebug "address.Level: ${nodeAddress}.${level}"
+            def dni = 'isy.'+nodeAddress    // the dni we are using
+            def d = kids?.find {
+                it.device.deviceNetworkId == dni
+            }
+            if(d)
+            {
+                updateNodeLevel(d, level)
+            }
+        }
     }
 
     // Handle rest response from the ISY forwarder
@@ -255,8 +361,6 @@
         if(evt.name == "ping") {
             return ""
         }
-
-//        printDebug('Received Response: ' + evt.description)
 
         def description = evt.description
         def hub = evt?.hubId
@@ -274,28 +378,14 @@
             sourceUrl = msg.headers.SourceUrl
         }
 
-        def statusReq = '/rest/status'
-
         if (msg.body != null) 
         {
+            def statusReq = '/rest/status'
+
             // ------- /rest/nodes
            if('/rest/nodes' == sourceUrl)
             {
-                    def xmlNodes = msg.xml.node
-                    printDebug 'Nodes: ' + xmlNodes.size()
-
-                    // parse the individual nodes from the rest result
-                    xmlNodes.each {
-                        def addr = it.address.text()
-                        def name = it.name.text()
-                        def type = it.@nodeDefId.text()
-                        if(addr && name && type)
-                        {
-                            printDebug "${addr} => ${name}.${type}"
-                            state.nodes[addr] = name
-                            state.types[addr] = type
-                        }
-                    }
+                enumerateNodes(msg)
             }
             else if(statusReq == sourceUrl.take(statusReq.size()))
             {
@@ -304,61 +394,12 @@
                 {
                     // a single status request
                     def nodeAddress = sourceUrl - statusReq - '/'   // remove the leadin
-                    printDebug "node address="+nodeAddress
-                    printDebug "found status request"+msg.body
-                    def xmlNodes = msg.xml.property
-                    def level = '0'
-                    xmlNodes.each {
-                        level = it.@formatted.text() - '%'
-                        printDebug "Level: ${level}"
-                    }
-                    // now set the level for this switch
-                    // get all child devices
-                    def kids = getChildDevices()    // do not get virtual devices (?)
-                    def dni = 'isy.'+nodeAddress    // the dni we are using
-                    def d = kids?.find {
-                        it.device.deviceNetworkId == dni
-                    }
-                    if(d)
-                    {
-                        if(level == '0')
-                        {
-                            // tell the switch its off but do not set level value
-                            d.sendEvent(name: 'switch', value: 'off')
-                        }
-                        else
-                        {
-                            // tell the switch it is on, and set the current level value
-                            d.sendEvent(name: 'switch', value: 'on')
-                            d.sendEvent(name: 'level', value: level)
-                        }
-                    }
+                    evaluateSwitchStatus(nodeAddress, msg)
                 }
                 // ------- /rest/status
                 else
                 {
-                    // a single status request
-                    // printDebug "found all status request"+msg.body
-                    def xmlNodes = msg.xml.node
-                    // get all child devices
-                    def kids = getChildDevices()    // do not get virtual devices (?)
-                    xmlNodes.each {
-                    // now set the level for this switch
-                        def level = it.property.@formatted.text() - '%'
-                        def nodeAddress = it.@id
-                       // printDebug "address.Level: ${nodeAddress}.${level}"
-                        def dni = 'isy.'+nodeAddress    // the dni we are using
-                        def d = kids?.find {
-                            it.device.deviceNetworkId == dni
-                        }
-                        if(d)
-                        {
-                            def switchset = (level == '0') ? 'off' : 'on'
-                            printDebug 'sending event to kid: '+dni+"@"+level+'.'+switchset
-                            d.sendEvent(name: 'level', value: level)
-                            d.sendEvent(name: 'switch', value: switchset)
-                        }
-                    }
+                    evaluateAllStatus(msg)
                 }
             }
         }
@@ -463,8 +504,10 @@
             state.subscribed = true
         }
 
-        // send the first status request, then every 300 seconds using runIn
+        // send the first status request, then every 7 minutes using Cron
         sendStatusRequest()
+        unschedule()    // i think we need to call this to avoid running multiple schedules if we rerun this
+        schedule("0 0/7 * 1/1 * ? *", sendStatusRequest)
     }
 
     def initializeIfDev() {
@@ -472,12 +515,11 @@
 
         def selDev = getSelectedDevice()
         def nodes = getNodes()
-        def types = getTypes()
 
         if (selDev) {
             def kids = getAllChildDevices()
             selectedRooms.each { room ->
-                def nodeAddr = nodes.find { it.value == room }.key
+                def nodeAddr = nodes.find { it.value.name == room }.key
                 def dni
 
                 /* First decide on the device network ID - assign one device
@@ -499,7 +541,7 @@
 
                 if (!d) {
                     printDebug("Adding node ${nodeAddr} as ${dni}: ${nodes[nodeAddr]}")
-                    def atype = types[nodeAddr]
+                    def atype = nodes[nodeAddr].type
                     def childType = 'ISY Switch'
                     if(atype.contains('immer'))
                     {
@@ -507,7 +549,7 @@
                         printDebug("dimmer found for ${nodes[nodeAddr]}")
                     }
                     d = addChildDevice("isy", childType, dni, selDev?.value.hub, [
-                        "label": nodes[nodeAddr],
+                        "label": nodes[nodeAddr].name,
                         "data": [
                             "nodeAddr": nodeAddr,
                             "ip": selDev.value.ip,
@@ -527,11 +569,10 @@
         printDebug('Initializing for IP')
 
         def nodes = getNodes()
-        def types = getTypes()
         def kids = getAllChildDevices()
 
         selectedRooms.each { room ->
-            def nodeAddr = nodes.find { it.value == room }.key
+            def nodeAddr = nodes.find { it.value.name == room }.key
             def dni = 'isy.'+nodeAddr
 
             def d = kids?.find {
@@ -540,7 +581,7 @@
 
             if (!d) {
                 printDebug("Adding node ${nodeAddr} as ${dni}: ${nodes[nodeAddr]}")
-                def atype = types[nodeAddr]
+                def atype = nodes[nodeAddr].type
                 def childType = 'ISY Switch'
                 if(atype.contains('immer'))
                 {
@@ -548,7 +589,7 @@
                     printDebug("dimmer found for ${nodes[nodeAddr]}")
                 }
                 d = addChildDevice("isy", childType, dni, state.hubid, [
-                    "label": nodes[nodeAddr],
+                    "label": nodes[nodeAddr].name,
                     "data": [
                         "nodeAddr": nodeAddr,
                         "ip": ipaddress,
