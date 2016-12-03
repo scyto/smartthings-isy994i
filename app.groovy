@@ -43,6 +43,11 @@
         page(name:"entryPage", title:"ISY Setup 4", content:"entryPage")
     }
 
+// --------------------------------------------------------------------------
+// GUI Pages
+// --------------------------------------------------------------------------
+
+    // First GUI Page
     // Decide if we use IP proxy or standard ISY
     def ipPage() {
         printDebug "*****Running ip page"
@@ -67,6 +72,7 @@
         }
     }
 
+    // Second GUI Page
     // Credentials preferences page - collect ISY username and password
     // or pick IP:port
     def credPage() {
@@ -95,22 +101,32 @@
         }
     }
 
+    // Third GUI Page
     // ISY selection page - discover and choose which ISY to control
     // skipped if using ip address
     def isyPage() {
         printDebug "*****Running isy page"
 
-        def refreshInterval = 5
+        def refreshInterval = 0
+        def devices = getDevices()
 
-        if(!state.subscribed) {
-            printDebug('Subscribing to updates')
-            // subscribe to answers from HUB, all responses will go here
-            subscribe(location, "ssdpTerm.urn:udi-com:device:X_Insteon_Lighting_Device:1", ssdpHandler, [filterEvents:false])
-            state.subscribed = true
+        // this is hacky but isyPage gets called after install
+        // for no obvious reason
+        if(devices.size() == 0)
+        {
+            stopSubscribing()
+
+            if(!state.subscribed) {
+                printDebug('Subscribing to updates')
+                // subscribe to answers from HUB, all responses will go here
+                subscribe(location, "ssdpTerm.urn:udi-com:device:X_Insteon_Lighting_Device:1", ssdpHandler, [filterEvents:false])
+                state.subscribed = true
+            }
+            refreshInterval = 5
+                
+            printDebug('Performing discovery')
+            sendHubCommand(new physicalgraph.device.HubAction("lan discovery urn:udi-com:device:X_Insteon_Lighting_Device:1", physicalgraph.device.Protocol.LAN))
         }
-
-        printDebug('Performing discovery')
-        sendHubCommand(new physicalgraph.device.HubAction("lan discovery urn:udi-com:device:X_Insteon_Lighting_Device:1", physicalgraph.device.Protocol.LAN))
 
         def devicesForDialog = getDevicesForDialog()
 
@@ -120,6 +136,89 @@
                 input "selectedISY", "enum", required:false, title:"Select ISY \n(${devicesForDialog.size() ?: 0} found)", multiple:true, options:devicesForDialog
             }
         }
+    }
+
+    // Fourth GUI Page
+    // This page has no data entry. Its just a placeholder where we wait for the Nodes to be polled
+    // and then enumerated
+    def nodePage() {
+        printDebug "*****Running node page"
+
+        def nodes = getNodes()
+
+        // turn off the ssdp searcher here
+        stopSubscribing()
+    
+        // subscribe to the generic guy that reads REST results
+        if(!state.subscribed) {
+            printDebug('Subscribing to more updates')
+            // subscribe to answers from HUB, all responses will go here
+            subscribe(location, null, locationHandler, [filterEvents:false])
+            state.subscribed = true
+        }
+
+        // we only run this when we have no prebuilt nodes
+        // so really only after an uninstall or on a clean install
+        // not on a rerun
+        if(nodes.size() == 0)
+        {
+            // define the IP by hardcode or ISY device
+            if(isuseip)
+            {
+                state.ipaddress = ipaddress
+                state.port = ipport
+            }
+            else
+            {
+                def selDev = getSelectedDevice()
+                state.ipaddress = selDev.value.ip
+                state.port = selDev.value.port
+            }
+            // send the Query Nodes REST command            
+            def path = "/rest/nodes"
+            sendHubCommand(getRequest(state.ipaddress, state.port, path))
+        }
+
+        def refreshInterval = 5;
+        return dynamicPage(name:"nodePage", title:"ISY Node Reading (Page 3 of 4)", nextPage:"entryPage", install:false, refreshInterval:refreshInterval) {
+            section("Waiting for nodes to be found") {
+                paragraph "Wait for the next line to fill in with a set of non-zero nodes. Usually this will take 5 seconds. Then click Next at the top of the page."
+                paragraph  "Finding Nodes... \n(${nodes.size() ?: 0} found)"
+            }
+        }
+    }
+
+    // Last GUI Page
+    // Node selection preference page - choose which Insteon lights to control
+    def entryPage() {
+        printDebug "*****Running entry page"
+
+        stopSubscribing()
+
+        def nodes = getNodes()
+        // sort the light names alphabetically
+        def rooms = nodes.collect {it.value.name}.sort()
+
+        return dynamicPage(name:"entryPage", title:"ISY Node Selection (Page 4 of 4)", nextPage:"", install:true, uninstall: true) {
+            section("Select nodes...") {
+                paragraph "Click below to get a list of devices (lights). Pick which lights to add to the SmartThings database. That will fill the list below. Then click Done to add them."
+                input "selectedRooms", "enum", required:false, title:"Select Nodes \n(${nodes.size() ?: 0} found)", multiple:true, options:rooms
+            }
+        }
+    }
+
+// --------------------------------------------------------------------------
+// Utility Methods
+// --------------------------------------------------------------------------
+
+    // stop subscriber
+    def stopSubscribing()
+    {
+        if(state.subscribed)
+        {
+            unsubscribe()
+            state.subscribed = false;
+        }        
     }
 
     // Returns a map of ISYs for the preference page
@@ -134,84 +233,14 @@
         map
     }
 
-    // Returns a map of ISYs for internal use
+    // Returns the ISY map
     def getDevices() {
         if (!state.devices) { state.devices = [:] }
         printDebug("There are ${state.devices.size()} devices at this time")
         state.devices
     }
 
-    // Node selection preference page - choose which Insteon devices to control
-    def nodePage() {
-        printDebug "*****Running node page"
-
-        def refreshInterval = 5;
-        def path = "/rest/nodes"
-        def nodes = getNodes()
-
-        if(nodes.size() == 0)
-        {
-            if(state.subscribed)
-            {
-                unsubscribe()
-                state.subscribed = false;
-            }
-        
-            if(!state.subscribed) {
-                printDebug('Subscribing to more updates')
-                // subscribe to answers from HUB, all responses will go here
-                subscribe(location, null, locationHandler, [filterEvents:false])
-                state.subscribed = true
-            }
-
-            if(isuseip)
-            {
-                state.ipaddress = ipaddress
-                state.port = ipport
-            }
-            else
-            {
-                def selDev = getSelectedDevice()
-                state.ipaddress = selDev.value.ip
-                state.port = selDev.value.port
-            }
-            sendHubCommand(getRequest(state.ipaddress, state.port, path))
-
-            nodes = getNodes()
-        }
-
-        return dynamicPage(name:"nodePage", title:"ISY Node Reading (Page 3 of 4)", nextPage:"entryPage", install:false, refreshInterval:refreshInterval) {
-            section("Waiting for nodes to be found") {
-                paragraph "Wait for the next line to fill in with a set of non-zero nodes. Usually this will take 5 seconds. Then click Next at the top of the page."
-                paragraph  "Finding Nodes... \n(${nodes.size() ?: 0} found)"
-            }
-        }
-
-    }
-
-    // Node selection preference page - choose which Insteon devices to control
-    def entryPage() {
-        printDebug "*****Running entry page"
-
-        if(state.subscribed)
-        {
-            unsubscribe()
-            state.subscribed = false;
-        }
-
-        def nodes = getNodes()
-        def rooms = nodes.collect {it.value.name}.sort()
-
-        // sort the nodes alphabetically ???
-        return dynamicPage(name:"entryPage", title:"ISY Node Selection (Page 4 of 4)", nextPage:"", install:true, uninstall: true) {
-            section("Select nodes...") {
-                paragraph "Click below to get a list of devices (lights). Pick which lights to add to the SmartThings database. That will fill the list below. Then click Done to add them."
-                input "selectedRooms", "enum", required:false, title:"Select Nodes \n(${nodes.size() ?: 0} found)", multiple:true, options:rooms
-            }
-        }
-    }
-
-    // Returns a map of Insteon nodes for the preferences page
+    // Return the selected ISY device based on mac address
     def getSelectedDevice() {
         def selDev
         selectedISY.each { dni ->
@@ -219,6 +248,10 @@
             printDebug("Looking for ${dni}")
             selDev = devices.find { it.value.mac == dni }
         }
+        if(selDev)
+            printDebug "found device ${selDev.value.mac}"
+        else
+            printDebug "did not find device(s)"
         selDev
     }
 
@@ -238,20 +271,23 @@
     {
         if(!state.subscribed) 
         {
+            // since we do not know which preferences pages were run when and some unsubscribe, make sure we turn it back on
             printDebug('Scheduler has to resubscribe')
-            // subscribe to answers from HUB, all responses will go here
             subscribe(location, null, locationHandler, [filterEvents:false])
             state.subscribed = true
         }
+
+        // now send the status request to find out levels of every switch
         def path = "/rest/status"
         sendHubCommand(getRequest(state.ipaddress, state.port, path))
     }
 
     // handle the response to a /rest/nodes request and enumerate all of the nodes
+    // put the node list into state.nodes
     def enumerateNodes(msg)
     {
         def xmlNodes = msg.xml.node
-        printDebug 'Nodes: ' + xmlNodes.size()
+        printDebug "Found ${xmlNodes.size()} nodes."
 
         // here we clear things out for real since we are about to reread them
         state.nodes = [:]
@@ -263,29 +299,50 @@
             def type = it.@nodeDefId.text()
             if(addr && name && type)
             {
+                // show the nodes found for debugging
                 printDebug "${addr} => ${name}.${type}"
-                state.nodes[addr] = [name:name, type:type, level:'0', ison:false]
+                // create a persistent node entry with name, type
+                state.nodes[addr] = [name:name, type:type]
             }
         }        
     }
 
-    // update a switch settings so it looks correct
+    // update switch settings so it is current
+    // this is in response to a status answer
     def updateNodeLevel(d, level)
     {
-        def nodes = getNodes()
         def nodeAddress = d.device.deviceNetworkId - 'isy.'
-        def n = nodes?.find {
-            it.key == nodeAddress
-        }
+
+        // i cant tell if this is string or int
+        if(level == 0)
+            level = '0'
+
         def isOn = (level != '0')
-        // check the cached value so we do not thrash
-        if(!n || (n.value.ison != isOn) || (isOn && n.value.level != level))
+        def oldLevel = d.latestValue("level")
+        def oldOn = d.latestValue("switch")
+        if(oldLevel == null || oldOn == null)
         {
-            if(n)
-                printDebug 'sending event to kid: '+d.device.deviceNetworkId+"@"+level+". Old level=" + n.value.level
-             else  {
-                printDebug 'sending event to kid: '+d.device.deviceNetworkId+"@"+level+". No existing node"
-             }
+            oldLevel = '12'
+            oldOn = true
+        }
+        else{
+            oldLevel = oldLevel.toString()
+            oldOn = oldOn.equals('on')
+        }
+
+        // check the cached value so we do not thrash
+        // we do not want to reset the on-level if we are turning the switch off
+        if((oldOn != isOn) || (isOn && oldLevel != level))
+        {
+            if(isOn && oldLevel != level)
+            {
+                printDebug "setting levels old=[${oldLevel}] and new=[${level}]"
+            }
+            else if(oldOn != isOn)
+            {
+                printDebug "settings switch to [${isOn}] was [${oldOn}]"
+            }
+
             if(!isOn)  {
                 // tell the switch its off but do not set level value
                 d.sendEvent(name: 'switch', value: 'off')
@@ -296,12 +353,6 @@
                 d.sendEvent(name: 'switch', value: 'on')
             }
 
-            // update the cached node value
-            if(n) {
-                n.value.ison = isOn
-                if(isOn)
-                    n.value.level = level
-            }
         }
         else  {
             printDebug "No change to kid: " + nodeAddress
@@ -333,18 +384,16 @@
         }
     }
 
+    // deal with the result from an all switch status response
     def evaluateAllStatus(msg)
     {
-        // a single status request
-        // printDebug "found all status request"+msg.body
         def xmlNodes = msg.xml.node
         // get all child devices
         def kids = getChildDevices()    // do not get virtual devices (?)
+        // now set the level for each read switch
         xmlNodes.each {
-        // now set the level for this switch
             def level = it.property.@formatted.text() - '%'
             def nodeAddress = it.@id
-            // printDebug "address.Level: ${nodeAddress}.${level}"
             def dni = 'isy.'+nodeAddress    // the dni we are using
             def d = kids?.find {
                 it.device.deviceNetworkId == dni
@@ -356,11 +405,14 @@
         }
     }
 
-    // Handle rest response from the ISY forwarder
+    // Message subscriber
+    // Handle a REST response from the ISY forwarder
     def locationHandler(evt) {
         if(evt.name == "ping") {
             return ""
         }
+
+        printDebug "Entering location handler"
 
         def description = evt.description
         def hub = evt?.hubId
@@ -371,13 +423,31 @@
         printDebug('lan message headers: ' + msg.header)
 
         // the SourceUrl property is echoed from our NGINX server only!
-        def sourceUrl = '/rest/nodes'
+        // so if you do not use an NGINX forwarder a single switch refresh is not going to work
+        // since we do not know who generated it
+        def sourceUrl = ''
         if(msg.headers['SourceUrl'])
         {
-            printDebug('lan source header: ' + msg.headers.SourceUrl)
             sourceUrl = msg.headers.SourceUrl
+            printDebug('lan source header: ' + sourceUrl)
+        }
+        else if(msg.body != null)
+        {
+            // if no NGINX, try to figure it out
+            if(msg.body.contains('nodeDefId'))
+            {
+                if(msg.xml.node && msg.xml.node.size() > 0)
+                    sourceUrl = '/rest/nodes'
+            }
+            else if(msg.body.contains('node id='))
+            {
+                if(msg.xml.node && msg.xml.node.size() > 0)
+                    sourceUrl = '/rest/status'
+            }
+            printDebug "Infered sourceUrl=${sourceUrl}"
         }
 
+        // we hopefully have a valid sourceUrl now so we know what to interpret
         if (msg.body != null) 
         {
             def statusReq = '/rest/status'
@@ -402,6 +472,10 @@
                     evaluateAllStatus(msg)
                 }
             }
+            else
+            {
+                printDebug "body: "+msg.body
+            }
         }
     }
 
@@ -412,7 +486,7 @@
         }
 
         printDebug('Received ssdp Response: ' + evt.description)
-
+        
         def description = evt.description
         def hub = evt?.hubId
         def parsedEvent = parseDiscoveryMessage(description)
@@ -443,7 +517,8 @@
                 {
                     def children = getAllChildDevices()
                     children.each {
-                        if (it.getDeviceDataByName("mac") == parsedEvent.mac) {
+                        if (it.getDeviceDataByName("mac") == parsedEvent.mac) 
+                        {
                             //it.subscribe(parsedEvent.ip, parsedEvent.port)
                         }
                     }
@@ -460,8 +535,7 @@
     def installed() {
         printDebug("!!!!! running installed")
         // remove location subscription
-        unsubscribe()
-        state.subscribed = false
+        stopSubscribing()
 
         printDebug "Installed with settings: ${settings}"
 
@@ -472,7 +546,7 @@
         printDebug("!!!!! running updated")
         printDebug "Updated with settings: ${settings}"
 
-        unsubscribe()
+        stopSubscribing()
         initialize()
     }
 
@@ -485,6 +559,9 @@
         return state.primaryNode
     }
 
+    // this key method deals with when we initialize the app (end the last preference page)
+    // it creates the list of child lights (ones the SmartThing will control) and then
+    // it schedules a status request so we can update our switch values every few minutes
     def initialize() {
         printDebug("!!!!! running initialize")
         if(isuseip)
@@ -510,6 +587,7 @@
         schedule("0 0/7 * 1/1 * ? *", sendStatusRequest)
     }
 
+    // set up switch list when using ISY device
     def initializeIfDev() {
         printDebug('Initializing for devices')
 
@@ -556,8 +634,6 @@
                             "port": selDev.value.port,
                             "username": username,
                             "password": password,
-                            "switch" : 'off',
-                            "level" : '50'
                         ]
                     ])
                 }
@@ -565,6 +641,7 @@
         }
     }
 
+    // set up switch list when using a hardcoded IP address for NGINX
     def initializeIfIp() {
         printDebug('Initializing for IP')
 
@@ -701,6 +778,6 @@
     // so we can turn debugging on and off
     def printDebug(str)
     {
-        log.debug(str)
+//        log.debug(str)
     }
 
