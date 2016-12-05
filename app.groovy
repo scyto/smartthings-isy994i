@@ -301,7 +301,7 @@
             {
                 // we get all nodes reported here, some are not lamps
                 // and we do not have a way to control a not-lamp for now
-                if(type.startsWith('DimmerLamp') or type.startsWith('RelayLamp'))
+                if(type.startsWith('DimmerLamp') || type.startsWith('RelayLamp'))
                 {
                     // show the nodes found for debugging
                     printDebug "${addr} => ${name}.${type}"
