@@ -299,10 +299,20 @@
             def type = it.@nodeDefId.text()
             if(addr && name && type)
             {
-                // show the nodes found for debugging
-                printDebug "${addr} => ${name}.${type}"
-                // create a persistent node entry with name, type
-                state.nodes[addr] = [name:name, type:type]
+                // we get all nodes reported here, some are not lamps
+                // and we do not have a way to control a not-lamp for now
+                if(type.startsWith('DimmerLamp') or type.startsWith('RelayLamp'))
+                {
+                    // show the nodes found for debugging
+                    printDebug "${addr} => ${name}.${type}"
+                    // create a persistent node entry with name, type
+                    state.nodes[addr] = [name:name, type:type]
+                }
+                else
+                {
+                    // show the nodes found for debugging
+                    printDebug "## ${addr} => ${name}.${type} -- not a lamp"
+                }
             }
         }        
     }
